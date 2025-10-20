@@ -4,11 +4,16 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppLayout } from "./components/layout/AppLayout";
+import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import Dashboard from "./pages/Dashboard";
 import Tickets from "./pages/Tickets";
 import Customers from "./pages/Customers";
 import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
+import Departments from "./pages/Departments";
+import Agents from "./pages/Agents";
+import Auth from "./pages/Auth";
+import PublicTicket from "./pages/PublicTicket";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -19,17 +24,64 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <AppLayout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/tickets" element={<Tickets />} />
-            <Route path="/customers" element={<Customers />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/settings" element={<Settings />} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AppLayout>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/submit-ticket" element={<PublicTicket />} />
+          
+          {/* Protected routes */}
+          <Route path="/" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Dashboard />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/tickets" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Tickets />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/customers" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Customers />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/analytics" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Analytics />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/departments" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Departments />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/agents" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Agents />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/settings" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Settings />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

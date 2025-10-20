@@ -1,4 +1,4 @@
-import { Home, Ticket, Users, Settings, BarChart3 } from "lucide-react";
+import { Home, Ticket, Users, Settings, BarChart3, Building2, UserCog, LogOut } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
   Sidebar as SidebarUI,
@@ -10,19 +10,24 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
+  SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useAuth } from "@/hooks/useAuth";
 
 const menuItems = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Tickets", url: "/tickets", icon: Ticket },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Departments", url: "/departments", icon: Building2, adminOnly: true },
+  { title: "Agents & Team", url: "/agents", icon: UserCog, adminOnly: true },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 export const Sidebar = () => {
   const { open } = useSidebar();
+  const { hasRole, signOut } = useAuth();
 
   return (
     <SidebarUI className={open ? "w-64" : "w-16"} collapsible="icon">
@@ -40,27 +45,42 @@ export const Sidebar = () => {
           <SidebarGroupLabel>Main Menu</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink 
-                      to={item.url}
-                      className={({ isActive }) =>
-                        isActive 
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground" 
-                          : "hover:bg-sidebar-accent/50"
-                      }
-                    >
-                      <item.icon className="w-5 h-5" />
-                      {open && <span>{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {menuItems.map((item) => {
+                if (item.adminOnly && !hasRole("super_admin")) return null;
+                
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild>
+                      <NavLink 
+                        to={item.url}
+                        className={({ isActive }) =>
+                          isActive 
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground" 
+                            : "hover:bg-sidebar-accent/50"
+                        }
+                      >
+                        <item.icon className="w-5 h-5" />
+                        {open && <span>{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      
+      <SidebarFooter className="border-t border-sidebar-border p-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={signOut}>
+              <LogOut className="w-5 h-5" />
+              {open && <span>Sign Out</span>}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
     </SidebarUI>
   );
 };
