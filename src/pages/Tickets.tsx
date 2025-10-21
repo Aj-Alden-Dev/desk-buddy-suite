@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TicketDetailSheet } from "@/components/tickets/TicketDetailSheet";
 
 const mockTickets = [
   {
@@ -69,6 +70,7 @@ const mockTickets = [
 const Tickets = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState<any>(null);
 
   return (
     <div className="p-8 space-y-6">
@@ -159,7 +161,11 @@ const Tickets = () => {
           </TableHeader>
           <TableBody>
             {mockTickets.map((ticket) => (
-              <TableRow key={ticket.id} className="cursor-pointer hover:bg-muted/50">
+              <TableRow 
+                key={ticket.id} 
+                className="cursor-pointer hover:bg-muted/50"
+                onClick={() => setSelectedTicket(ticket)}
+              >
                 <TableCell className="font-medium">{ticket.id}</TableCell>
                 <TableCell>{ticket.title}</TableCell>
                 <TableCell>
@@ -197,6 +203,14 @@ const Tickets = () => {
           </TableBody>
         </Table>
       </div>
+
+      {selectedTicket && (
+        <TicketDetailSheet
+          open={!!selectedTicket}
+          onOpenChange={(open) => !open && setSelectedTicket(null)}
+          ticket={selectedTicket}
+        />
+      )}
     </div>
   );
 };
