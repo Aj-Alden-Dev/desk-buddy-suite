@@ -14,6 +14,147 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_logs: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          ip_address: string | null
+          new_values: Json | null
+          old_values: Json | null
+          resource_id: string | null
+          resource_type: string
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          new_values?: Json | null
+          old_values?: Json | null
+          resource_id?: string | null
+          resource_type: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          new_values?: Json | null
+          old_values?: Json | null
+          resource_id?: string | null
+          resource_type?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      automation_rules: {
+        Row: {
+          actions: Json | null
+          conditions: Json | null
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          priority: number | null
+          trigger_event: string
+          updated_at: string
+        }
+        Insert: {
+          actions?: Json | null
+          conditions?: Json | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          priority?: number | null
+          trigger_event: string
+          updated_at?: string
+        }
+        Update: {
+          actions?: Json | null
+          conditions?: Json | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          priority?: number | null
+          trigger_event?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      call_records: {
+        Row: {
+          agent_id: string | null
+          call_status: string
+          call_type: string
+          created_at: string
+          customer_id: string | null
+          duration_seconds: number | null
+          ended_at: string | null
+          id: string
+          phone_number: string | null
+          recording_url: string | null
+          started_at: string
+          ticket_id: string | null
+          transcript: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          call_status: string
+          call_type: string
+          created_at?: string
+          customer_id?: string | null
+          duration_seconds?: number | null
+          ended_at?: string | null
+          id?: string
+          phone_number?: string | null
+          recording_url?: string | null
+          started_at?: string
+          ticket_id?: string | null
+          transcript?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          call_status?: string
+          call_type?: string
+          created_at?: string
+          customer_id?: string | null
+          duration_seconds?: number | null
+          ended_at?: string | null
+          id?: string
+          phone_number?: string | null
+          recording_url?: string | null
+          started_at?: string
+          ticket_id?: string | null
+          transcript?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_records_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_records_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customers: {
         Row: {
           company: string | null
@@ -71,6 +212,221 @@ export type Database = {
         }
         Relationships: []
       }
+      email_templates: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          is_active: boolean | null
+          name: string
+          subject: string
+          template_type: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          name: string
+          subject: string
+          template_type: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          subject?: string
+          template_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      kb_article_feedback: {
+        Row: {
+          article_id: string
+          comment: string | null
+          created_at: string
+          id: string
+          is_helpful: boolean
+          user_id: string | null
+        }
+        Insert: {
+          article_id: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          is_helpful: boolean
+          user_id?: string | null
+        }
+        Update: {
+          article_id?: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          is_helpful?: boolean
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_article_feedback_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "kb_articles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_article_versions: {
+        Row: {
+          article_id: string
+          content: string
+          created_at: string
+          created_by: string | null
+          id: string
+          title: string
+          version_number: number
+        }
+        Insert: {
+          article_id: string
+          content: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          title: string
+          version_number: number
+        }
+        Update: {
+          article_id?: string
+          content?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          title?: string
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_article_versions_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "kb_articles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_articles: {
+        Row: {
+          author_id: string | null
+          category_id: string | null
+          content: string
+          created_at: string
+          excerpt: string | null
+          helpful_count: number | null
+          id: string
+          is_public: boolean | null
+          not_helpful_count: number | null
+          published_at: string | null
+          search_vector: unknown | null
+          status: string
+          tags: string[] | null
+          title: string
+          updated_at: string
+          view_count: number | null
+        }
+        Insert: {
+          author_id?: string | null
+          category_id?: string | null
+          content: string
+          created_at?: string
+          excerpt?: string | null
+          helpful_count?: number | null
+          id?: string
+          is_public?: boolean | null
+          not_helpful_count?: number | null
+          published_at?: string | null
+          search_vector?: unknown | null
+          status?: string
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          view_count?: number | null
+        }
+        Update: {
+          author_id?: string | null
+          category_id?: string | null
+          content?: string
+          created_at?: string
+          excerpt?: string | null
+          helpful_count?: number | null
+          id?: string
+          is_public?: boolean | null
+          not_helpful_count?: number | null
+          published_at?: string | null
+          search_vector?: unknown | null
+          status?: string
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
+          view_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_articles_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "kb_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_categories: {
+        Row: {
+          created_at: string
+          description: string | null
+          display_order: number | null
+          icon: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          parent_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          display_order?: number | null
+          icon?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          parent_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          display_order?: number | null
+          icon?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          parent_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_categories_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "kb_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -106,6 +462,124 @@ export type Database = {
           },
         ]
       }
+      sla_policies: {
+        Row: {
+          business_hours_only: boolean | null
+          created_at: string
+          description: string | null
+          first_response_time_minutes: number
+          id: string
+          is_active: boolean | null
+          name: string
+          priority: string
+          resolution_time_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          business_hours_only?: boolean | null
+          created_at?: string
+          description?: string | null
+          first_response_time_minutes: number
+          id?: string
+          is_active?: boolean | null
+          name: string
+          priority: string
+          resolution_time_minutes: number
+          updated_at?: string
+        }
+        Update: {
+          business_hours_only?: boolean | null
+          created_at?: string
+          description?: string | null
+          first_response_time_minutes?: number
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          priority?: string
+          resolution_time_minutes?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ticket_activities: {
+        Row: {
+          activity_type: string
+          created_at: string
+          description: string | null
+          id: string
+          new_value: string | null
+          old_value: string | null
+          ticket_id: string
+          user_id: string | null
+        }
+        Insert: {
+          activity_type: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          new_value?: string | null
+          old_value?: string | null
+          ticket_id: string
+          user_id?: string | null
+        }
+        Update: {
+          activity_type?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          new_value?: string | null
+          old_value?: string | null
+          ticket_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_activities_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ticket_notes: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          is_internal: boolean | null
+          ticket_id: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean | null
+          ticket_id: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean | null
+          ticket_id?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_notes_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tickets: {
         Row: {
           assigned_agent_id: string | null
@@ -116,9 +590,16 @@ export type Database = {
           customer_phone: string | null
           department_id: string | null
           description: string | null
+          first_response_at: string | null
+          first_response_due_at: string | null
           id: string
           priority: string
+          resolution_due_at: string | null
+          resolved_at: string | null
+          sla_breached: boolean | null
+          sla_policy_id: string | null
           status: string
+          tags: string[] | null
           ticket_number: string
           title: string
           updated_at: string
@@ -132,9 +613,16 @@ export type Database = {
           customer_phone?: string | null
           department_id?: string | null
           description?: string | null
+          first_response_at?: string | null
+          first_response_due_at?: string | null
           id?: string
           priority?: string
+          resolution_due_at?: string | null
+          resolved_at?: string | null
+          sla_breached?: boolean | null
+          sla_policy_id?: string | null
           status?: string
+          tags?: string[] | null
           ticket_number: string
           title: string
           updated_at?: string
@@ -148,14 +636,28 @@ export type Database = {
           customer_phone?: string | null
           department_id?: string | null
           description?: string | null
+          first_response_at?: string | null
+          first_response_due_at?: string | null
           id?: string
           priority?: string
+          resolution_due_at?: string | null
+          resolved_at?: string | null
+          sla_breached?: boolean | null
+          sla_policy_id?: string | null
           status?: string
+          tags?: string[] | null
           ticket_number?: string
           title?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "tickets_assigned_agent_id_fkey"
+            columns: ["assigned_agent_id"]
+            isOneToOne: false
+            referencedRelation: "agent_performance"
+            referencedColumns: ["agent_id"]
+          },
           {
             foreignKeyName: "tickets_assigned_agent_id_fkey"
             columns: ["assigned_agent_id"]
@@ -168,6 +670,13 @@ export type Database = {
             columns: ["department_id"]
             isOneToOne: false
             referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tickets_sla_policy_id_fkey"
+            columns: ["sla_policy_id"]
+            isOneToOne: false
+            referencedRelation: "sla_policies"
             referencedColumns: ["id"]
           },
         ]
@@ -192,7 +701,32 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      agent_performance: {
+        Row: {
+          agent_id: string | null
+          agent_name: string | null
+          avg_resolution_time_hours: number | null
+          resolved_tickets: number | null
+          sla_met_tickets: number | null
+          total_notes: number | null
+          total_tickets: number | null
+        }
+        Relationships: []
+      }
+      ticket_metrics: {
+        Row: {
+          avg_first_response_time_minutes: number | null
+          avg_resolution_time_hours: number | null
+          closed_tickets: number | null
+          date: string | null
+          in_progress_tickets: number | null
+          open_tickets: number | null
+          resolved_tickets: number | null
+          sla_breached_tickets: number | null
+          total_tickets: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       generate_ticket_number: {
