@@ -1,4 +1,4 @@
-import { Home, Ticket, Users, Settings, BarChart3, Building2, UserCog, LogOut } from "lucide-react";
+import { Home, Ticket, Users, Settings, BarChart3, Building2, UserCog, LogOut, BookOpen, Phone, BarChart, Zap } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
   Sidebar as SidebarUI,
@@ -19,6 +19,10 @@ const menuItems = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Tickets", url: "/tickets", icon: Ticket },
   { title: "Customers", url: "/customers", icon: Users },
+  { title: "Knowledge Base", url: "/knowledge-base", icon: BookOpen },
+  { title: "Calls", url: "/calls", icon: Phone },
+  { title: "Reports", url: "/reports", icon: BarChart },
+  { title: "Automations", url: "/automations", icon: Zap },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Departments", url: "/departments", icon: Building2, adminOnly: true },
   { title: "Agents & Team", url: "/agents", icon: UserCog, adminOnly: true },

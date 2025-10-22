@@ -14,6 +14,10 @@ import Departments from "./pages/Departments";
 import Agents from "./pages/Agents";
 import Auth from "./pages/Auth";
 import PublicTicket from "./pages/PublicTicket";
+import KnowledgeBase from "./pages/KnowledgeBase";
+import Reports from "./pages/Reports";
+import Calls from "./pages/Calls";
+import Automations from "./pages/Automations";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -48,6 +52,34 @@ const App = () => (
             <ProtectedRoute>
               <AppLayout>
                 <Customers />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/knowledge-base" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <KnowledgeBase />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/calls" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Calls />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/reports" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Reports />
+              </AppLayout>
+            </ProtectedRoute>
+          } />
+          <Route path="/automations" element={
+            <ProtectedRoute>
+              <AppLayout>
+                <Automations />
               </AppLayout>
             </ProtectedRoute>
           } />
