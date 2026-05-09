@@ -2,115 +2,64 @@ name: Create Standard Sub-Issues
 
 on:
   issues:
-    types:
-      - opened
-      - edited
+    types: [opened, edited]
 
 permissions:
   issues: write
 
 jobs:
   create-subissues:
-    if: contains(github.event.issue.title, '[DELIVERABLE]')
     runs-on: ubuntu-latest
+
+    if: contains(github.event.issue.title, '[DELIVERABLE]')
 
     steps:
 
-      - name: Create SIA issue
+      - name: Create standard child issues
         uses: actions/github-script@v7
+
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
           script: |
 
-            const issue = context.payload.issue;
-            const title = issue.title.replace('[DELIVERABLE]', '').trim();
+            const parent = context.payload.issue;
 
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'all',
-              per_page: 100
-            });
+            const cleanTitle = parent.title
+              .replace('[DELIVERABLE]', '')
+              .trim();
 
-            const exists = issues.some(i =>
-              i.title === `[SIA] ${title}`
-            );
+            async function createIssue(prefix, label) {
 
-            if (!exists) {
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'all',
+                per_page: 100
+              });
+
+              const exists = issues.some(issue =>
+                issue.title === `${prefix} ${cleanTitle}`
+              );
+
+              if (exists) {
+                console.log(`${prefix} already exists`);
+                return;
+              }
 
               await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                title: `[SIA] ${title}`,
-                body: `Parent Deliverable: #${issue.number}`,
-                labels: ['security-review']
+                title: `${prefix} ${cleanTitle}`,
+                body: `Parent Deliverable: #${parent.number}`,
+                labels: [label]
               });
 
-              console.log('Created SIA');
+              console.log(`Created ${prefix}`);
             }
 
-      - name: Create TESTING issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
+            await createIssue('[SIA]', 'security-review');
 
-            const issue = context.payload.issue;
-            const title = issue.title.replace('[DELIVERABLE]', '').trim();
+            await createIssue('[TESTING]', 'testing');
 
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'all',
-              per_page: 100
-            });
-
-            const exists = issues.some(i =>
-              i.title === `[TESTING] ${title}`
-            );
-
-            if (!exists) {
-
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `[TESTING] ${title}`,
-                body: `Parent Deliverable: #${issue.number}`,
-                labels: ['testing']
-              });
-
-              console.log('Created TESTING');
-            }
-
-      - name: Create CLOSURE issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-
-            const issue = context.payload.issue;
-            const title = issue.title.replace('[DELIVERABLE]', '').trim();
-
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'all',
-              per_page: 100
-            });
-
-            const exists = issues.some(i =>
-              i.title === `[CLOSURE] ${title}`
-            );
-
-            if (!exists) {
-
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `[CLOSURE] ${title}`,
-                body: `Parent Deliverable: #${issue.number}`,
-                labels: ['closure']
-              });
-
-              console.log('Created CLOSURE');
-            }
+            await createIssue('[CLOSURE]', 'closure');
