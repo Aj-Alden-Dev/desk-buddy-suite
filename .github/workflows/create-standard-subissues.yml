@@ -15,53 +15,90 @@ jobs:
 
     steps:
 
-      - name: Create SIA Issue
+      - name: Create missing child issues
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
 
             const parent = context.payload.issue;
-            const title = parent.title.replace('[DELIVERABLE]', '').trim();
 
-            await github.rest.issues.create({
+            const cleanTitle = parent.title
+              .replace('[DELIVERABLE]', '')
+              .trim();
+
+            const { data: issues } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[SIA] ${title}`,
-              body: `Parent Deliverable: #${parent.number}`,
-              labels: ['security-review']
+              state: 'all',
+              per_page: 100
             });
 
-      - name: Create TESTING Issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
+            async function createIssue(prefix, label) {
 
-            const parent = context.payload.issue;
-            const title = parent.title.replace('[DELIVERABLE]', '').trim();
+              const existing = issues.find(issue =>
+                issue.title === `${prefix} ${cleanTitle}`
+              );
 
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `[TESTING] ${title}`,
-              body: `Parent Deliverable: #${parent.number}`,
-              labels: ['testing']
-            });
+              if (existing) {
+                console.log(`${prefix} already exists`);
+                return existing;
+              }
 
-      - name: Create CLOSURE Issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `${prefix} ${cleanTitle}`,
+                body:
+`Parent Deliverable: #${parent.number}
 
-            const parent = context.payload.issue;
-            const title = parent.title.replace('[DELIVERABLE]', '').trim();
+Automatically created child issue.`,
+                labels: [label]
+              });
 
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `[CLOSURE] ${title}`,
-              body: `Parent Deliverable: #${parent.number}`,
-              labels: ['closure']
-            });
+              return created.data;
+            }
+
+            const sia = await createIssue('[SIA]', 'security-review');
+            const testing = await createIssue('[TESTING]', 'testing');
+            const closure = await createIssue('[CLOSURE]', 'closure');
+
+            async function linkSubIssue(child) {
+
+              try {
+
+                await github.graphql(`
+                  mutation {
+                    addSubIssue(input: {
+                      issueId: "${parent.node_id}",
+                      subIssueId: "${child.node_id}"
+                    }) {
+                      issue {
+                        id
+                      }
+                    }
+                  }
+                `);
+
+                console.log(`Linked ${child.title}`);
+
+              } catch (err) {
+
+                console.log('Sub-issue linking failed');
+                console.log(err.message);
+
+                // fallback relationship comment
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: parent.number,
+                  body:
+`Linked child issue:
+- #${child.number} ${child.title}`
+                });
+              }
+            }
+
+            await linkSubIssue(sia);
+            await linkSubIssue(testing);
+            await linkSubIssue(closure);
