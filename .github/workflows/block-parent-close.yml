@@ -9,15 +9,21 @@ permissions:
   issues: write
 
 jobs:
-  validate-subissues:
+
+  validate-parent-close:
+
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Reopen parent if child issues still open
+      - name: Reopen parent if child issues are open
+
         uses: actions/github-script@v7
+
         with:
+
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
           script: |
 
             const parent = context.payload.issue;
@@ -30,31 +36,35 @@ jobs:
               .replace('[DELIVERABLE]', '')
               .trim();
 
-            const { data: issues } = await github.rest.issues.listForRepo({
+            const result = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
               per_page: 100
             });
 
-            const openChildren = issues.filter(issue => {
+            const openIssues = result.data;
+
+            const childIssues = openIssues.filter(issue => {
 
               if (issue.number === parent.number) {
                 return false;
               }
 
+              const title = issue.title;
+
               return (
-                issue.title.includes(cleanTitle) &&
+                title.includes(cleanTitle) &&
                 (
-                  issue.title.startsWith('[SIA]') ||
-                  issue.title.startsWith('[SECURITY]') ||
-                  issue.title.startsWith('[TESTING]') ||
-                  issue.title.startsWith('[CLOSURE]')
+                  title.startsWith('[SIA]') ||
+                  title.startsWith('[TESTING]') ||
+                  title.startsWith('[CLOSURE]') ||
+                  title.startsWith('[SECURITY]')
                 )
               );
             });
 
-            if (openChildren.length > 0) {
+            if (childIssues.length > 0) {
 
               await github.rest.issues.update({
                 owner: context.repo.owner,
@@ -63,21 +73,22 @@ jobs:
                 state: 'open'
               });
 
+              let comment =
+                'Cannot close this deliverable.\\n\\n' +
+                'Open child issues still exist:\\n\\n';
+
+              for (const issue of childIssues) {
+
+                comment +=
+                  '- #' + issue.number + ' ' + issue.title + '\\n';
+              }
+
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: parent.number,
-                body:
-`❌ Cannot close deliverable.
-
-Open child issues still exist:
-
-${openChildren.map(i =>
-`- #${i.number} ${i.title}`
-).join('\n')}
-
-Please close all child issues first.`
+                body: comment
               });
 
-              console.log('Parent reopened.');
+              console.log('Parent issue reopened.');
             }
