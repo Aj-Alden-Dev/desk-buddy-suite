@@ -1,0 +1,67 @@
+name: Create Standard Sub-Issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+
+  create-standard-subissues:
+    if: contains(github.event.issue.title, '[DELIVERABLE]')
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Create SIA Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+
+            const parent = context.payload.issue;
+            const title = parent.title.replace('[DELIVERABLE]', '').trim();
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[SIA] ${title}`,
+              body: `Parent Deliverable: #${parent.number}`,
+              labels: ['security-review']
+            });
+
+      - name: Create TESTING Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+
+            const parent = context.payload.issue;
+            const title = parent.title.replace('[DELIVERABLE]', '').trim();
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[TESTING] ${title}`,
+              body: `Parent Deliverable: #${parent.number}`,
+              labels: ['testing']
+            });
+
+      - name: Create CLOSURE Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+
+            const parent = context.payload.issue;
+            const title = parent.title.replace('[DELIVERABLE]', '').trim();
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[CLOSURE] ${title}`,
+              body: `Parent Deliverable: #${parent.number}`,
+              labels: ['closure']
+            });
