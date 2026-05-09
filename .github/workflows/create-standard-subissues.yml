@@ -15,7 +15,7 @@ jobs:
 
     steps:
 
-      - name: Create missing child issues
+      - name: Create child issues safely
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -27,6 +27,7 @@ jobs:
               .replace('[DELIVERABLE]', '')
               .trim();
 
+            // Get all issues
             const { data: issues } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -34,7 +35,7 @@ jobs:
               per_page: 100
             });
 
-            async function createIssue(prefix, label) {
+            async function ensureIssue(prefix, label) {
 
               const existing = issues.find(issue =>
                 issue.title === `${prefix} ${cleanTitle}`
@@ -52,53 +53,39 @@ jobs:
                 body:
 `Parent Deliverable: #${parent.number}
 
-Automatically created child issue.`,
+This issue was auto-created.`,
                 labels: [label]
               });
+
+              console.log(`Created ${prefix}`);
 
               return created.data;
             }
 
-            const sia = await createIssue('[SIA]', 'security-review');
-            const testing = await createIssue('[TESTING]', 'testing');
-            const closure = await createIssue('[CLOSURE]', 'closure');
+            const sia = await ensureIssue('[SIA]', 'security-review');
+            const testing = await ensureIssue('[TESTING]', 'testing');
+            const closure = await ensureIssue('[CLOSURE]', 'closure');
 
-            async function linkSubIssue(child) {
+            // Add relationship comments safely
+            async function addRelationship(child) {
 
               try {
 
-                await github.graphql(`
-                  mutation {
-                    addSubIssue(input: {
-                      issueId: "${parent.node_id}",
-                      subIssueId: "${child.node_id}"
-                    }) {
-                      issue {
-                        id
-                      }
-                    }
-                  }
-                `);
-
-                console.log(`Linked ${child.title}`);
-
-              } catch (err) {
-
-                console.log('Sub-issue linking failed');
-                console.log(err.message);
-
-                // fallback relationship comment
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: parent.number,
                   body:
-`Linked child issue:
+`Child Issue Linked:
 - #${child.number} ${child.title}`
                 });
+
+              } catch (err) {
+
+                console.log(err.message);
               }
             }
 
-            await linkSubIssue(sia);
-            await linkSubIssue(testing);
-            await linkSubIssue(closure);
+            await addRelationship(sia);
+            await addRelationship(testing);
+            await addRelationship(closure);
