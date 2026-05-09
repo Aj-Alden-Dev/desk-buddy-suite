@@ -2,7 +2,7 @@ name: Create Standard Sub-Issues
 
 on:
   issues:
-    types: [opened]
+    types: [opened, edited]
 
 permissions:
   issues: write
