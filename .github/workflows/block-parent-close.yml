@@ -7,6 +7,25 @@ permissions:
   issues: write
   repository-projects: write
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ONE-TIME SETUP REQUIRED
+# ══════════════════════════════════════════════════════════════════════════════
+# GITHUB_TOKEN cannot write to user-level projects (@username's project).
+# You must create a Personal Access Token (PAT) and add it as a repo secret.
+#
+# Steps:
+#   1. Go to GitHub → Settings → Developer settings → Personal access tokens
+#      → Tokens (classic) → Generate new token (classic)
+#   2. Tick the "project" scope (grants read/write to Projects v2)
+#   3. Copy the token
+#   4. Go to your repo → Settings → Secrets and variables → Actions → New secret
+#   5. Name: PROJECT_TOKEN   Value: (paste the token)
+#
+# The workflow uses PROJECT_TOKEN for all project mutations and GITHUB_TOKEN
+# for issue operations (reopen, comment). If PROJECT_TOKEN is not set it will
+# log a warning but still reopen the issue.
+# ══════════════════════════════════════════════════════════════════════════════
+
 jobs:
   validate-parent-close:
     runs-on: ubuntu-latest
@@ -16,34 +35,38 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const parent = context.payload.issue;
-            const owner  = context.repo.owner;
-            const repo   = context.repo.repo;
+            const parent       = context.payload.issue;
+            const owner        = context.repo.owner;
+            const repo         = context.repo.repo;
+            // PAT with "project" scope — required for user-level project mutations
+            const projectToken = '${{ secrets.PROJECT_TOKEN }}';
 
             if (!parent.title.includes('[DELIVERABLE]')) return;
 
             // ── 1. Find open sub-issues ───────────────────────────────────────
             const openChildren = await findOpenSubIssues(parent.number);
-
             if (openChildren.length === 0) {
               console.log('All sub-issues closed – allowing parent to close.');
               return;
             }
-            console.log(`${openChildren.length} open sub-issue(s) found – blocking.`);
+            console.log(`${openChildren.length} open sub-issue(s) blocking close.`);
 
-            // ── 2. Reopen the issue ───────────────────────────────────────────
+            // ── 2. Reopen the issue (GITHUB_TOKEN is sufficient for this) ─────
             await github.rest.issues.update({
               owner, repo, issue_number: parent.number, state: 'open'
             });
 
-            // ── 3. Revert project status back to the "not done" column ────────
-            // We query the issue's own project items directly so this works for
-            // both org-level and user-level projects without any hardcoded IDs.
-            // This replaces the separate projects_v2_item workflow which is
-            // unreliable for user-owned (non-org) projects.
-            await revertProjectStatus(parent.number);
+            // ── 3. Revert the project status using the PAT ───────────────────
+            if (!projectToken || projectToken === '') {
+              console.log(
+                '⚠️  PROJECT_TOKEN secret not set – cannot revert project status.\n' +
+                'Create a PAT with the "project" scope and add it as PROJECT_TOKEN.'
+              );
+            } else {
+              await revertProjectStatus(parent.number, projectToken);
+            }
 
-            // ── 4. Comment on the issue ───────────────────────────────────────
+            // ── 4. Post blocking comment ──────────────────────────────────────
             const lines = openChildren.map(i => `- #${i.number} ${i.title}`).join('\n');
             await github.rest.issues.createComment({
               owner, repo,
@@ -76,7 +99,6 @@ jobs:
                   }
                 );
                 open.push(...data.filter(i => i.state === 'open'));
-                console.log(`Sub-Issues API: ${data.length} linked, ${open.length} open.`);
               } catch (e) {
                 console.log('Sub-Issues API unavailable, using fallback:', e.message);
               }
@@ -104,12 +126,16 @@ jobs:
               return open;
             }
 
-            async function revertProjectStatus(issueNumber) {
-              // Query all project items linked to this issue, along with their
-              // Status field options so we can find the right option ID to revert to.
+            async function revertProjectStatus(issueNumber, token) {
+              // Use the PAT for GraphQL so we can write to user-level projects
+              const authedGraphql = github.graphql.defaults({
+                headers: { authorization: `token ${token}` }
+              });
+
+              // Query all project items linked to this issue
               let projectItems;
               try {
-                const result = await github.graphql(`
+                const result = await authedGraphql(`
                   query($owner: String!, $repo: String!, $number: Int!) {
                     repository(owner: $owner, name: $repo) {
                       issue(number: $number) {
@@ -134,7 +160,6 @@ jobs:
                     }
                   }
                 `, { owner, repo, number: issueNumber });
-
                 projectItems = result.repository.issue.projectItems.nodes;
               } catch (e) {
                 console.log('Could not query project items:', e.message);
@@ -144,21 +169,17 @@ jobs:
               for (const item of projectItems) {
                 const statusValue = item.fieldValueByName;
                 if (!statusValue) continue;
-
-                const currentStatus = statusValue.name?.toLowerCase();
-                if (currentStatus !== 'done') {
-                  console.log(`Project item status is "${statusValue.name}" – no revert needed.`);
+                if (statusValue.name?.toLowerCase() !== 'done') {
+                  console.log(`Status is "${statusValue.name}" – no revert needed.`);
                   continue;
                 }
 
-                // Pick the revert-to option: prefer "In Progress", then "Todo",
-                // then any first non-Done column.
-                const options  = statusValue.field?.options ?? [];
-                const notDone  = options.filter(o => o.name.toLowerCase() !== 'done');
-                const target   =
+                // Find the revert-to option — handles any casing of TO DO / To Do / todo
+                const options = statusValue.field?.options ?? [];
+                const notDone = options.filter(o => o.name.toLowerCase() !== 'done');
+                const target  =
                   notDone.find(o => o.name.toLowerCase() === 'in progress') ||
-                  notDone.find(o => o.name.toLowerCase() === 'todo')        ||
-                  notDone.find(o => o.name.toLowerCase() === 'to do')       ||
+                  notDone.find(o => ['to do', 'todo'].includes(o.name.toLowerCase())) ||
                   notDone[0];
 
                 if (!target) {
@@ -167,7 +188,7 @@ jobs:
                 }
 
                 try {
-                  await github.graphql(`
+                  await authedGraphql(`
                     mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
                       updateProjectV2ItemFieldValue(input: {
                         projectId: $project
@@ -182,9 +203,9 @@ jobs:
                     field:   statusValue.field.id,
                     option:  target.id
                   });
-                  console.log(`Project status reverted from "Done" to "${target.name}".`);
+                  console.log(`✅ Project status reverted from "Done" to "${target.name}".`);
                 } catch (e) {
-                  console.log('Could not revert project status:', e.message);
+                  console.log('Project status mutation failed:', e.message);
                 }
               }
             }
