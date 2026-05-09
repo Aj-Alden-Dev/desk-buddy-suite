@@ -9,7 +9,6 @@ permissions:
 jobs:
   create-security-subissue:
     runs-on: ubuntu-latest
-    # FIX: moved condition into job-level 'if' using correct expression syntax
     if: >-
       github.event.label.name == 'security-impact' &&
       contains(github.event.issue.title, '[DELIVERABLE]')
@@ -19,15 +18,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const issue  = context.payload.issue;
-            const owner  = context.repo.owner;
-            const repo   = context.repo.repo;
+            const issue      = context.payload.issue;
+            const owner      = context.repo.owner;
+            const repo       = context.repo.repo;
             const cleanTitle = issue.title.replace('[DELIVERABLE]', '').trim();
 
-            // ── FIX: query the Sub-Issues API instead of scanning all repo issues ──
-            // The original listForRepo approach fails silently on repos with >100 issues
-            // and can also produce false-positive matches on similarly-titled issues.
-            let existingSubIssues = [];
+            // ── Step 1: try the Sub-Issues API ──
+            let linkedSubIssues = [];
+            let subIssuesApiAvailable = false;
             try {
               const { data } = await github.request(
                 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
@@ -37,21 +35,40 @@ jobs:
                   headers: { 'X-GitHub-Api-Version': '2022-11-28' }
                 }
               );
-              existingSubIssues = data;
+              linkedSubIssues = data;
+              subIssuesApiAvailable = true;
             } catch (e) {
-              console.log('Sub-Issues API fetch failed:', e.message);
+              console.log('Sub-Issues API unavailable, using fallback:', e.message);
             }
 
-            const securityExists = existingSubIssues.some(i =>
-              i.title.startsWith('[SECURITY]')
-            );
+            // ── Step 2: check if [SECURITY] already exists ──
+            let securityExists = linkedSubIssues.some(i => i.title.startsWith('[SECURITY]'));
+
+            if (!securityExists) {
+              // Fallback: scan all issues for a [SECURITY] issue referencing this parent
+              const issues = [];
+              let page = 1;
+              while (true) {
+                const { data } = await github.rest.issues.listForRepo({
+                  owner, repo, state: 'all', per_page: 100, page
+                });
+                issues.push(...data);
+                if (data.length < 100) break;
+                page++;
+              }
+              securityExists = issues.some(i =>
+                i.title.startsWith('[SECURITY]') &&
+                i.body  &&
+                i.body.includes(`#${issue.number}`)
+              );
+            }
 
             if (securityExists) {
-              console.log('[SECURITY] sub-issue already linked – skipping.');
+              console.log('[SECURITY] sub-issue already exists – skipping.');
               return;
             }
 
-            // Create the optional security sub-issue
+            // ── Step 3: create the security sub-issue ──
             const { data: created } = await github.rest.issues.create({
               owner, repo,
               title:  `[SECURITY] ${cleanTitle}`,
@@ -59,26 +76,27 @@ jobs:
               labels: ['security-review']
             });
 
-            // Link it as a sub-issue
-            try {
-              await github.request(
-                'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
-                {
-                  owner, repo,
-                  issue_number:    issue.number,
-                  sub_issue_number: created.number,
-                  headers: { 'X-GitHub-Api-Version': '2022-11-28' }
-                }
-              );
-            } catch (e) {
-              console.log('Sub-Issues API link failed:', e.message);
+            if (subIssuesApiAvailable) {
+              try {
+                await github.request(
+                  'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+                  {
+                    owner, repo,
+                    issue_number:     issue.number,
+                    sub_issue_number: created.number,
+                    headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                  }
+                );
+                console.log(`Linked #${created.number} via Sub-Issues API.`);
+              } catch (e) {
+                console.log('Link failed (issue still created):', e.message);
+              }
             }
 
-            // FIX: notify the parent issue with a comment (was missing in original)
             await github.rest.issues.createComment({
               owner, repo,
               issue_number: issue.number,
               body: `## Security sub-issue created\n- #${created.number} ${created.title}`
             });
 
-            console.log(`Created and linked [SECURITY] #${created.number}`);
+            console.log(`Created [SECURITY] #${created.number}`);
