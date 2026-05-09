@@ -1,7 +1,7 @@
 name: Create Standard Sub-Issues
 on:
   issues:
-    types: [opened, edited]          # FIX: added 'edited' so renaming a deliverable still works
+    types: [opened, edited]
 
 permissions:
   issues: write
@@ -16,14 +16,29 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const parent  = context.payload.issue;
-            const owner   = context.repo.owner;
-            const repo    = context.repo.repo;
+            const parent     = context.payload.issue;
+            const owner      = context.repo.owner;
+            const repo       = context.repo.repo;
             const cleanTitle = parent.title.replace('[DELIVERABLE]', '').trim();
 
-            // ── FIX: use the Sub-Issues API to check what is already linked ──
-            // This is far more reliable than scanning all repo issues by title.
-            let existingSubIssues = [];
+            // ── Helper: paginate all repo issues (fallback dedup check) ──
+            async function getAllIssues() {
+              const issues = [];
+              let page = 1;
+              while (true) {
+                const { data } = await github.rest.issues.listForRepo({
+                  owner, repo, state: 'all', per_page: 100, page
+                });
+                issues.push(...data);
+                if (data.length < 100) break;
+                page++;
+              }
+              return issues;
+            }
+
+            // ── Step 1: try the Sub-Issues API (beta — may not be available on all accounts) ──
+            let linkedSubIssues = [];
+            let subIssuesApiAvailable = false;
             try {
               const { data } = await github.request(
                 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
@@ -33,55 +48,72 @@ jobs:
                   headers: { 'X-GitHub-Api-Version': '2022-11-28' }
                 }
               );
-              existingSubIssues = data;
+              linkedSubIssues = data;
+              subIssuesApiAvailable = true;
+              console.log(`Sub-Issues API OK. Found ${data.length} linked sub-issue(s).`);
             } catch (e) {
-              console.log('Sub-Issues API fetch failed (may be unavailable):', e.message);
+              console.log('Sub-Issues API unavailable, will use title/body fallback:', e.message);
             }
 
-            // Build a set of prefixes already present among linked sub-issues
-            // e.g. '[SIA] My feature' → 'SIA'
-            const existingPrefixes = new Set(
-              existingSubIssues
-                .map(i => { const m = i.title.match(/^\[([A-Z]+)\]/); return m ? m[1] : null; })
-                .filter(Boolean)
-            );
+            // ── Step 2: build set of prefixes that already exist ──
+            let existingPrefixes = new Set();
 
-            // ── Helper: create an issue then link it as a sub-issue ──
+            if (subIssuesApiAvailable && linkedSubIssues.length > 0) {
+              existingPrefixes = new Set(
+                linkedSubIssues
+                  .map(i => { const m = i.title.match(/^\[([A-Z]+)\]/); return m ? m[1] : null; })
+                  .filter(Boolean)
+              );
+            } else {
+              // Fallback: match issues that (a) have a known prefix AND
+              // (b) reference this parent issue number in their body.
+              // Both conditions together prevent false-positives from unrelated issues.
+              const all = await getAllIssues();
+              for (const i of all) {
+                const prefixMatch = i.title.match(/^\[(SIA|TESTING|CLOSURE|SECURITY)\]/);
+                const hasBodyRef  = i.body && i.body.includes(`#${parent.number}`);
+                if (prefixMatch && hasBodyRef) {
+                  existingPrefixes.add(prefixMatch[1]);
+                }
+              }
+              console.log(`Fallback found: [${[...existingPrefixes].join(', ') || 'none'}]`);
+            }
+
+            // ── Step 3: create missing sub-issues and attempt to link them ──
             async function createAndLink(prefix, label) {
               if (existingPrefixes.has(prefix)) {
-                console.log(`[${prefix}] already linked – skipping.`);
+                console.log(`[${prefix}] already exists – skipping.`);
                 return null;
               }
 
               const { data: created } = await github.rest.issues.create({
                 owner, repo,
-                title:  `[${prefix}] ${cleanTitle}`,
-                body:   `Parent deliverable: #${parent.number}`,
+                title: `[${prefix}] ${cleanTitle}`,
+                // The body MUST include the parent reference — the fallback scan relies on it
+                body:  `Parent deliverable: #${parent.number}`,
                 labels: [label]
               });
 
-              // Link as an actual sub-issue (not just a comment mention)
-              try {
-                await github.request(
-                  'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
-                  {
-                    owner, repo,
-                    issue_number:    parent.number,
-                    sub_issue_number: created.number,
-                    headers: { 'X-GitHub-Api-Version': '2022-11-28' }
-                  }
-                );
-              } catch (e) {
-                console.log(`Sub-Issues API link failed for #${created.number}:`, e.message);
+              if (subIssuesApiAvailable) {
+                try {
+                  await github.request(
+                    'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+                    {
+                      owner, repo,
+                      issue_number:     parent.number,
+                      sub_issue_number: created.number,
+                      headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                    }
+                  );
+                  console.log(`Linked #${created.number} via Sub-Issues API.`);
+                } catch (e) {
+                  console.log(`Link failed for #${created.number} (issue still created):`, e.message);
+                }
               }
 
-              console.log(`Created and linked [${prefix}] #${created.number}`);
               return created;
             }
 
-            // ── Create the three mandatory sub-issues (labels are distinct per type) ──
-            // FIX: renamed 'security-review' label on SIA to 'sia' so it doesn't
-            //      collide with the security-impact workflow which also uses 'security-review'.
             const sia     = await createAndLink('SIA',     'sia');
             const testing = await createAndLink('TESTING', 'testing');
             const closure = await createAndLink('CLOSURE', 'closure');
