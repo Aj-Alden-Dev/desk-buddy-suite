@@ -1,8 +1,7 @@
 name: Create Standard Sub-Issues
-
 on:
   issues:
-    types: [opened]
+    types: [opened, edited]          # FIX: added 'edited' so renaming a deliverable still works
 
 permissions:
   issues: write
@@ -10,53 +9,89 @@ permissions:
 jobs:
   create-subissues:
     runs-on: ubuntu-latest
-
     if: contains(github.event.issue.title, '[DELIVERABLE]')
-
     steps:
-
       - name: Create and link child issues
         uses: actions/github-script@v7
-
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
           script: |
+            const parent  = context.payload.issue;
+            const owner   = context.repo.owner;
+            const repo    = context.repo.repo;
+            const cleanTitle = parent.title.replace('[DELIVERABLE]', '').trim();
 
-            const parent = context.payload.issue;
+            // ── FIX: use the Sub-Issues API to check what is already linked ──
+            // This is far more reliable than scanning all repo issues by title.
+            let existingSubIssues = [];
+            try {
+              const { data } = await github.request(
+                'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+                {
+                  owner, repo,
+                  issue_number: parent.number,
+                  headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                }
+              );
+              existingSubIssues = data;
+            } catch (e) {
+              console.log('Sub-Issues API fetch failed (may be unavailable):', e.message);
+            }
 
-            const cleanTitle = parent.title
-              .replace('[DELIVERABLE]', '')
-              .trim();
+            // Build a set of prefixes already present among linked sub-issues
+            // e.g. '[SIA] My feature' → 'SIA'
+            const existingPrefixes = new Set(
+              existingSubIssues
+                .map(i => { const m = i.title.match(/^\[([A-Z]+)\]/); return m ? m[1] : null; })
+                .filter(Boolean)
+            );
 
-            async function createIssue(prefix, label) {
+            // ── Helper: create an issue then link it as a sub-issue ──
+            async function createAndLink(prefix, label) {
+              if (existingPrefixes.has(prefix)) {
+                console.log(`[${prefix}] already linked – skipping.`);
+                return null;
+              }
 
-              const created = await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `${prefix} ${cleanTitle}`,
-                body:
-`Parent Deliverable: #${parent.number}`,
+              const { data: created } = await github.rest.issues.create({
+                owner, repo,
+                title:  `[${prefix}] ${cleanTitle}`,
+                body:   `Parent deliverable: #${parent.number}`,
                 labels: [label]
               });
 
-              return created.data;
+              // Link as an actual sub-issue (not just a comment mention)
+              try {
+                await github.request(
+                  'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+                  {
+                    owner, repo,
+                    issue_number:    parent.number,
+                    sub_issue_number: created.number,
+                    headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                  }
+                );
+              } catch (e) {
+                console.log(`Sub-Issues API link failed for #${created.number}:`, e.message);
+              }
+
+              console.log(`Created and linked [${prefix}] #${created.number}`);
+              return created;
             }
 
-            const sia = await createIssue('[SIA]', 'security-review');
+            // ── Create the three mandatory sub-issues (labels are distinct per type) ──
+            // FIX: renamed 'security-review' label on SIA to 'sia' so it doesn't
+            //      collide with the security-impact workflow which also uses 'security-review'.
+            const sia     = await createAndLink('SIA',     'sia');
+            const testing = await createAndLink('TESTING', 'testing');
+            const closure = await createAndLink('CLOSURE', 'closure');
 
-            const testing = await createIssue('[TESTING]', 'testing');
-
-            const closure = await createIssue('[CLOSURE]', 'closure');
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: parent.number,
-              body:
-`## Child Issues
-
-- #${sia.number} ${sia.title}
-- #${testing.number} ${testing.title}
-- #${closure.number} ${closure.title}`
-            });
+            const created = [sia, testing, closure].filter(Boolean);
+            if (created.length > 0) {
+              const lines = created.map(i => `- #${i.number} ${i.title}`).join('\n');
+              await github.rest.issues.createComment({
+                owner, repo,
+                issue_number: parent.number,
+                body: `## Sub-issues created\n${lines}`
+              });
+            }
