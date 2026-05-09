@@ -1,0 +1,91 @@
+name: Prevent Parent Close
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+
+  validate-subissues:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Prevent closing if child issues still open
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+
+            const parent = context.payload.issue;
+
+            // Only validate deliverable issues
+            if (!parent.title.includes('[DELIVERABLE]')) {
+              return;
+            }
+
+            const cleanTitle = parent.title
+              .replace('[DELIVERABLE]', '')
+              .trim();
+
+            // Fetch all open issues
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            // Match related child issues
+            const childIssues = issues.filter(issue => {
+
+              if (issue.number === parent.number) {
+                return false;
+              }
+
+              const title = issue.title;
+
+              return (
+                title.includes(cleanTitle) &&
+                (
+                  title.startsWith('[SIA]') ||
+                  title.startsWith('[SECURITY]') ||
+                  title.startsWith('[TESTING]') ||
+                  title.startsWith('[CLOSURE]')
+                )
+              );
+            });
+
+            // If child issues still open -> reopen parent
+            if (childIssues.length > 0) {
+
+              // Reopen parent issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: parent.number,
+                state: 'open'
+              });
+
+              // Add explanation comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: parent.number,
+                body:
+`❌ Cannot close this deliverable yet.
+
+The following sub-issues are still open:
+
+${childIssues.map(issue =>
+`- #${issue.number} ${issue.title}`
+).join('\n')}
+
+Please complete all sub-issues before closing this deliverable.`
+              });
+
+              console.log('Parent issue reopened because child issues are still open.');
+            }
