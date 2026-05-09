@@ -21,13 +21,21 @@ jobs:
 
             if (!parent.title.includes('[DELIVERABLE]')) return;
 
-            // ── FIX 1: use the Sub-Issues API instead of title-scanning listForRepo ──
-            // The original approach:
-            //   a) capped at 100 issues (silent data loss on larger repos)
-            //   b) matched by title substring — any issue containing the same words
-            //      would trigger a false block
-            // The Sub-Issues API returns *only* the directly linked children.
-            let subIssues = [];
+            // ════════════════════════════════════════════════════════════════
+            // ROOT CAUSE FIX (seen in screenshot):
+            //
+            // The Sub-Issues API (beta) silently failed to link the child issues.
+            // Workflow 3 queried it, got an empty array, assumed no children,
+            // and allowed the parent to close even though #45/#46/#47 existed.
+            //
+            // Fix: use TWO detection strategies and take the union of results.
+            //   Strategy A — Sub-Issues API        (precise, works if API is available)
+            //   Strategy B — title prefix + body   (reliable fallback, works always)
+            // ════════════════════════════════════════════════════════════════
+
+            let openChildren = [];
+
+            // ── Strategy A: Sub-Issues API ──
             try {
               const { data } = await github.request(
                 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
@@ -37,31 +45,56 @@ jobs:
                   headers: { 'X-GitHub-Api-Version': '2022-11-28' }
                 }
               );
-              subIssues = data;
+              const open = data.filter(i => i.state === 'open');
+              console.log(`Sub-Issues API: ${data.length} total, ${open.length} open.`);
+              openChildren.push(...open);
             } catch (e) {
-              console.log('Sub-Issues API fetch failed:', e.message);
-              // If the API is unavailable, fail open (allow close) rather than
-              // permanently blocking the issue.
-              return;
+              console.log('Sub-Issues API unavailable, relying on fallback only:', e.message);
             }
 
-            const openChildren = subIssues.filter(i => i.state === 'open');
+            // ── Strategy B: paginated title-prefix + body-reference scan ──
+            // Run this regardless of whether Strategy A succeeded, then deduplicate.
+            // A child issue must satisfy BOTH conditions to avoid false-positives:
+            //   1. Title starts with [SIA], [TESTING], [CLOSURE], or [SECURITY]
+            //   2. Body contains a reference to this parent issue number
+            const knownNumbers = new Set(openChildren.map(i => i.number));
+            const prefixRe = /^\[(SIA|TESTING|CLOSURE|SECURITY)\]/;
+            let page = 1;
+            while (true) {
+              const { data: batch } = await github.rest.issues.listForRepo({
+                owner, repo,
+                state:    'open',
+                per_page: 100,
+                page
+              });
+              for (const i of batch) {
+                if (i.number === parent.number)    continue;
+                if (knownNumbers.has(i.number))    continue;
+                if (!prefixRe.test(i.title))       continue;
+                if (!i.body)                       continue;
+                if (!i.body.includes(`#${parent.number}`)) continue;
+                openChildren.push(i);
+                knownNumbers.add(i.number);
+              }
+              if (batch.length < 100) break;
+              page++;
+            }
+
+            console.log(`Total open sub-issues found: ${openChildren.length}`);
 
             if (openChildren.length === 0) {
-              console.log('All sub-issues are closed – allowing parent to close.');
+              console.log('All sub-issues closed – allowing parent to close.');
               return;
             }
 
-            // Reopen the parent
+            // ── Reopen the parent ──
             await github.rest.issues.update({
               owner, repo,
               issue_number: parent.number,
               state: 'open'
             });
 
-            // ── FIX 2: was '\\n' (literal backslash-n) – now '\n' (real newline) ──
-            // In a YAML literal block scalar the JS source is taken verbatim,
-            // so '\\n' in the YAML → '\\n' in JS → prints as \n, not a line break.
+            // Build the comment (note: single '\n' — was '\\n' bug in original)
             const lines = openChildren
               .map(i => `- #${i.number} ${i.title}`)
               .join('\n');
@@ -76,25 +109,32 @@ jobs:
                 '',
                 lines,
                 '',
-                'Close all sub-issues first, then close this deliverable.'
+                '_Close all sub-issues first, then close this deliverable._'
               ].join('\n')
             });
 
-            console.log(`Parent #${parent.number} reopened – ${openChildren.length} open sub-issue(s).`);
+            console.log(`Parent #${parent.number} reopened – ${openChildren.length} open sub-issue(s) blocking.`);
 
 ---
 # ── BONUS: Block "Done" status in GitHub Projects v2 ────────────────────────
 #
-# The issues.closed event above only fires when the issue is directly closed.
-# If your GitHub Project is configured to auto-close issues on "Done", that
-# already works. But if you want to block the status change *before* the issue
-# closes, use this second workflow on the projects_v2_item event.
+# Fires when a project card is moved to "Done" column.
+# Uses the same hybrid detection strategy as Workflow 3.
 #
-# Prerequisites:
-#   1. The repo must belong to an organisation or have Projects enabled.
-#   2. Add 'project: write' to permissions if you want to revert the status.
-#   3. Replace YOUR_DONE_FIELD_ID and YOUR_DONE_OPTION_ID with the real IDs
-#      (get them from the Projects GraphQL API or Settings → Fields).
+# Setup required:
+#   Replace the four YOUR_* placeholders with real values from your project.
+#   To find them, run this GraphQL query in https://docs.github.com/en/graphql/overview/explorer
+#
+#   query {
+#     user(login: "YOUR_GITHUB_USERNAME") {
+#       projectV2(number: YOUR_PROJECT_NUMBER) {
+#         id
+#         fields(first: 20) {
+#           nodes { ... on ProjectV2SingleSelectField { id name options { id name } } }
+#         }
+#       }
+#     }
+#   }
 #
 name: Block Project Done Status
 on:
@@ -108,7 +148,6 @@ permissions:
 jobs:
   block-done-status:
     runs-on: ubuntu-latest
-    # Only act when the Status field is being set to Done
     if: >-
       github.event.changes.field_value.field_name == 'Status' &&
       github.event.changes.field_value.after.name  == 'Done'
@@ -122,25 +161,23 @@ jobs:
             const owner = context.repo.owner;
             const repo  = context.repo.repo;
 
-            // Resolve the project item's linked issue number via GraphQL
-            const query = `
-              query($nodeId: ID!) {
-                node(id: $nodeId) {
+            // Resolve project item → linked issue
+            const { node } = await github.graphql(`
+              query($id: ID!) {
+                node(id: $id) {
                   ... on ProjectV2Item {
-                    content {
-                      ... on Issue { number title }
-                    }
+                    content { ... on Issue { number title body } }
                   }
                 }
               }
-            `;
-            const result = await github.graphql(query, { nodeId: item.node_id });
-            const linked = result?.node?.content;
+            `, { id: item.node_id });
 
-            if (!linked || !linked.title?.includes('[DELIVERABLE]')) return;
+            const linked = node?.content;
+            if (!linked?.title?.includes('[DELIVERABLE]')) return;
 
-            // Fetch sub-issues
-            let subIssues = [];
+            // ── Same hybrid detection as Workflow 3 ──
+            let openChildren = [];
+
             try {
               const { data } = await github.request(
                 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
@@ -150,40 +187,51 @@ jobs:
                   headers: { 'X-GitHub-Api-Version': '2022-11-28' }
                 }
               );
-              subIssues = data;
+              openChildren.push(...data.filter(i => i.state === 'open'));
             } catch (e) {
-              console.log('Sub-Issues API fetch failed:', e.message);
-              return;
+              console.log('Sub-Issues API unavailable:', e.message);
             }
 
-            const openChildren = subIssues.filter(i => i.state === 'open');
+            const knownNums = new Set(openChildren.map(i => i.number));
+            const prefixRe  = /^\[(SIA|TESTING|CLOSURE|SECURITY)\]/;
+            let page = 1;
+            while (true) {
+              const { data: batch } = await github.rest.issues.listForRepo({
+                owner, repo, state: 'open', per_page: 100, page
+              });
+              for (const i of batch) {
+                if (i.number === linked.number)              continue;
+                if (knownNums.has(i.number))                 continue;
+                if (!prefixRe.test(i.title))                 continue;
+                if (!i.body?.includes(`#${linked.number}`)) continue;
+                openChildren.push(i);
+                knownNums.add(i.number);
+              }
+              if (batch.length < 100) break;
+              page++;
+            }
+
             if (openChildren.length === 0) return;
 
-            // Revert the project item status back to "In Progress"
-            // Replace YOUR_PROJECT_ID, YOUR_FIELD_ID, YOUR_IN_PROGRESS_OPTION_ID
-            // with the real values from your project's GraphQL schema.
-            const mutation = `
-              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                updateProjectV2ItemFieldValue(input: {
-                  projectId: $projectId
-                  itemId:    $itemId
-                  fieldId:   $fieldId
-                  value:     { singleSelectOptionId: $optionId }
-                }) { projectV2Item { id } }
-              }
-            `;
+            // Revert card to "In Progress"
             try {
-              await github.graphql(mutation, {
-                projectId: 'YOUR_PROJECT_ID',
-                itemId:    item.node_id,
-                fieldId:   'YOUR_STATUS_FIELD_ID',
-                optionId:  'YOUR_IN_PROGRESS_OPTION_ID'
+              await github.graphql(`
+                mutation($p: ID!, $item: ID!, $field: ID!, $opt: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $p, itemId: $item, fieldId: $field,
+                    value: { singleSelectOptionId: $opt }
+                  }) { projectV2Item { id } }
+                }
+              `, {
+                p:    'YOUR_PROJECT_ID',
+                item: item.node_id,
+                field:'YOUR_STATUS_FIELD_ID',
+                opt:  'YOUR_IN_PROGRESS_OPTION_ID'
               });
             } catch (e) {
               console.log('Could not revert project status:', e.message);
             }
 
-            // Comment on the issue
             const lines = openChildren.map(i => `- #${i.number} ${i.title}`).join('\n');
             await github.rest.issues.createComment({
               owner, repo,
@@ -196,5 +244,3 @@ jobs:
                 lines
               ].join('\n')
             });
-
-            console.log(`Reverted project status for #${linked.number} – ${openChildren.length} open sub-issue(s).`);
