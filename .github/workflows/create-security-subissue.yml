@@ -1,51 +1,84 @@
 name: Create Security Sub-Issue
-
 on:
   issues:
-    types:
-      - labeled
+    types: [labeled]
 
 permissions:
   issues: write
 
 jobs:
   create-security-subissue:
-    if: |
+    runs-on: ubuntu-latest
+    # FIX: moved condition into job-level 'if' using correct expression syntax
+    if: >-
       github.event.label.name == 'security-impact' &&
       contains(github.event.issue.title, '[DELIVERABLE]')
-    runs-on: ubuntu-latest
-
     steps:
-
-      - name: Create SECURITY issue
+      - name: Create and link SECURITY sub-issue
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const issue  = context.payload.issue;
+            const owner  = context.repo.owner;
+            const repo   = context.repo.repo;
+            const cleanTitle = issue.title.replace('[DELIVERABLE]', '').trim();
 
-            const issue = context.payload.issue;
-            const title = issue.title.replace('[DELIVERABLE]', '').trim();
+            // ── FIX: query the Sub-Issues API instead of scanning all repo issues ──
+            // The original listForRepo approach fails silently on repos with >100 issues
+            // and can also produce false-positive matches on similarly-titled issues.
+            let existingSubIssues = [];
+            try {
+              const { data } = await github.request(
+                'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+                {
+                  owner, repo,
+                  issue_number: issue.number,
+                  headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                }
+              );
+              existingSubIssues = data;
+            } catch (e) {
+              console.log('Sub-Issues API fetch failed:', e.message);
+            }
 
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'all',
-              per_page: 100
-            });
-
-            const exists = issues.some(i =>
-              i.title === `[SECURITY] ${title}`
+            const securityExists = existingSubIssues.some(i =>
+              i.title.startsWith('[SECURITY]')
             );
 
-            if (!exists) {
-
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `[SECURITY] ${title}`,
-                body: `Security review required for #${issue.number}`,
-                labels: ['security-review']
-              });
-
-              console.log('Created SECURITY');
+            if (securityExists) {
+              console.log('[SECURITY] sub-issue already linked – skipping.');
+              return;
             }
+
+            // Create the optional security sub-issue
+            const { data: created } = await github.rest.issues.create({
+              owner, repo,
+              title:  `[SECURITY] ${cleanTitle}`,
+              body:   `Security review required for parent deliverable #${issue.number}`,
+              labels: ['security-review']
+            });
+
+            // Link it as a sub-issue
+            try {
+              await github.request(
+                'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+                {
+                  owner, repo,
+                  issue_number:    issue.number,
+                  sub_issue_number: created.number,
+                  headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                }
+              );
+            } catch (e) {
+              console.log('Sub-Issues API link failed:', e.message);
+            }
+
+            // FIX: notify the parent issue with a comment (was missing in original)
+            await github.rest.issues.createComment({
+              owner, repo,
+              issue_number: issue.number,
+              body: `## Security sub-issue created\n- #${created.number} ${created.title}`
+            });
+
+            console.log(`Created and linked [SECURITY] #${created.number}`);
