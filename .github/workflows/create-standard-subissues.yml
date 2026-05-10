@@ -20,93 +20,86 @@ jobs:
             const owner      = context.repo.owner;
             const repo       = context.repo.repo;
             const cleanTitle = parent.title.replace('[DELIVERABLE]', '').trim();
-            const parentRef  = `#${parent.number}`;
+            const parentRef  = '#' + parent.number;
 
-            // ── Body templates per sub-issue type ────────────────────────────
-            const templates = {
-              SIA: `
-## Security Impact Assessment
-**Parent deliverable:** ${parentRef} — ${cleanTitle}
+            // ── Body templates ────────────────────────────────────────────────
+            // Built with array join instead of multiline backtick strings.
+            // Multiline template literals with unindented markdown lines (## headings etc.)
+            // break YAML literal block scalar parsing — this approach avoids that entirely.
 
-### Scope
-<!-- Briefly describe what is being delivered and what systems/data it touches -->
+            function siaBody() {
+              return [
+                '## Security Impact Assessment',
+                '**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
+                '',
+                '### Scope',
+                '<!-- Briefly describe what is being delivered and what systems/data it touches -->',
+                '',
+                '### Impact checklist',
+                '- [ ] Does this change expose new data or APIs?',
+                '- [ ] Does this change affect authentication or authorisation?',
+                '- [ ] Does this change store, transmit or process personal/sensitive data?',
+                '- [ ] Does this change introduce new third-party dependencies?',
+                '- [ ] Does this change affect audit logging or monitoring?',
+                '',
+                '### Risk rating',
+                '<!-- Low / Medium / High \u2014 justify below -->',
+                '',
+                '### Mitigations',
+                '<!-- List any controls, guards or follow-up actions -->',
+                '',
+                '### Sign-off',
+                '- [ ] SIA reviewed and approved',
+              ].join('\n');
+            }
 
-### Impact checklist
-- [ ] Does this change expose new data or APIs?
-- [ ] Does this change affect authentication or authorisation?
-- [ ] Does this change store, transmit or process personal/sensitive data?
-- [ ] Does this change introduce new third-party dependencies?
-- [ ] Does this change affect audit logging or monitoring?
+            function testingBody() {
+              return [
+                '## Testing',
+                '**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
+                '',
+                '### Test scope',
+                '<!-- What needs to be tested? List features, flows, edge cases -->',
+                '',
+                '### Test checklist',
+                '- [ ] Unit tests written and passing',
+                '- [ ] Integration tests written and passing',
+                '- [ ] Edge cases identified and covered',
+                '- [ ] Regression tests run \u2014 no new failures',
+                '- [ ] Performance impact assessed (if applicable)',
+                '- [ ] Accessibility checked (if applicable)',
+                '',
+                '### Test environments',
+                '- [ ] Dev',
+                '- [ ] Staging',
+                '- [ ] Production smoke test',
+                '',
+                '### Sign-off',
+                '- [ ] All tests passing',
+                '- [ ] Test evidence attached or linked',
+              ].join('\n');
+            }
 
-### Risk rating
-<!-- Low / Medium / High — justify below -->
-
-### Mitigations
-<!-- List any controls, guards or follow-up actions -->
-
-### Sign-off
-- [ ] SIA reviewed and approved
-`.trim(),
-
-              TESTING: `
-## Testing
-**Parent deliverable:** ${parentRef} — ${cleanTitle}
-
-### Test scope
-<!-- What needs to be tested? List features, flows, edge cases -->
-
-### Test checklist
-- [ ] Unit tests written and passing
-- [ ] Integration tests written and passing
-- [ ] Edge cases identified and covered
-- [ ] Regression tests run — no new failures
-- [ ] Performance impact assessed (if applicable)
-- [ ] Accessibility checked (if applicable)
-
-### Test environments
-- [ ] Dev
-- [ ] Staging
-- [ ] Production smoke test
-
-### Sign-off
-- [ ] All tests passing
-- [ ] Test evidence attached or linked
-`.trim(),
-
-              CLOSURE: `
-## Closure
-**Parent deliverable:** ${parentRef} — ${cleanTitle}
-
-### Closure checklist
-- [ ] All sub-issues closed
-- [ ] Code merged to main branch
-- [ ] Deployment completed successfully
-- [ ] Documentation updated
-- [ ] Stakeholders notified
-- [ ] Monitoring / alerts confirmed healthy post-deploy
-- [ ] Any follow-up tickets raised for known future work
-
-### Deployment notes
-<!-- Version, deploy date, environment, rollback plan if needed -->
-
-### Sign-off
-- [ ] Closure confirmed by team lead
-`.trim()
-            };
-
-            // ── Helpers ───────────────────────────────────────────────────────
-            async function getAllIssues() {
-              const issues = [];
-              let page = 1;
-              while (true) {
-                const { data } = await github.rest.issues.listForRepo({
-                  owner, repo, state: 'all', per_page: 100, page
-                });
-                issues.push(...data);
-                if (data.length < 100) break;
-                page++;
-              }
-              return issues;
+            function closureBody() {
+              return [
+                '## Closure',
+                '**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
+                '',
+                '### Closure checklist',
+                '- [ ] All sub-issues closed',
+                '- [ ] Code merged to main branch',
+                '- [ ] Deployment completed successfully',
+                '- [ ] Documentation updated',
+                '- [ ] Stakeholders notified',
+                '- [ ] Monitoring / alerts confirmed healthy post-deploy',
+                '- [ ] Any follow-up tickets raised for known future work',
+                '',
+                '### Deployment notes',
+                '<!-- Version, deploy date, environment, rollback plan if needed -->',
+                '',
+                '### Sign-off',
+                '- [ ] Closure confirmed by team lead',
+              ].join('\n');
             }
 
             // ── Check existing sub-issues ─────────────────────────────────────
@@ -134,24 +127,33 @@ jobs:
                   .filter(Boolean)
               );
             } else {
-              const all = await getAllIssues();
+              const all = [];
+              let page = 1;
+              while (true) {
+                const { data } = await github.rest.issues.listForRepo({
+                  owner, repo, state: 'all', per_page: 100, page
+                });
+                all.push(...data);
+                if (data.length < 100) break;
+                page++;
+              }
               for (const i of all) {
                 const m = i.title.match(/^\[(SIA|TESTING|CLOSURE|SECURITY)\]/);
-                if (m && i.body?.includes(parentRef)) existingPrefixes.add(m[1]);
+                if (m && i.body && i.body.includes(parentRef)) existingPrefixes.add(m[1]);
               }
             }
 
             // ── Create missing sub-issues ─────────────────────────────────────
-            async function createAndLink(prefix, label) {
+            async function createAndLink(prefix, label, bodyFn) {
               if (existingPrefixes.has(prefix)) {
-                console.log(`[${prefix}] already exists – skipping.`);
+                console.log('[' + prefix + '] already exists - skipping.');
                 return null;
               }
 
               const { data: created } = await github.rest.issues.create({
                 owner, repo,
-                title:  `[${prefix}] ${cleanTitle}`,
-                body:   templates[prefix],
+                title:  '[' + prefix + '] ' + cleanTitle,
+                body:   bodyFn(),
                 labels: [label]
               });
 
@@ -167,23 +169,23 @@ jobs:
                     }
                   );
                 } catch (e) {
-                  console.log(`Sub-issue link failed for #${created.number}:`, e.message);
+                  console.log('Sub-issue link failed for #' + created.number + ':', e.message);
                 }
               }
 
               return created;
             }
 
-            const sia     = await createAndLink('SIA',     'sia');
-            const testing = await createAndLink('TESTING', 'testing');
-            const closure = await createAndLink('CLOSURE', 'closure');
+            const sia     = await createAndLink('SIA',     'sia',     siaBody);
+            const testing = await createAndLink('TESTING', 'testing', testingBody);
+            const closure = await createAndLink('CLOSURE', 'closure', closureBody);
 
             const created = [sia, testing, closure].filter(Boolean);
             if (created.length > 0) {
-              const lines = created.map(i => `- #${i.number} ${i.title}`).join('\n');
+              const lines = created.map(i => '- #' + i.number + ' ' + i.title).join('\n');
               await github.rest.issues.createComment({
                 owner, repo,
                 issue_number: parent.number,
-                body: `## Sub-issues created\n${lines}`
+                body: '## Sub-issues created\n' + lines
               });
             }
