@@ -30,7 +30,7 @@ jobs:
             function siaBody() {
               return [
                 '## Security Impact Assessment',
-                '**Parent deliverable:** ' + parentRef + ' — ' + cleanTitle,
+                '**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
                 '',
                 '### Ownership',
                 '- **Feature Owner:** ',
@@ -132,7 +132,7 @@ jobs:
             function testingBody() {
               return [
                 '## Testing',
-'**Parent deliverable:** ' + parentRef + ' — ' + cleanTitle,
+'**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
 '',
 '### Test scope',
 '<!-- Describe what is being tested and impacted areas -->',
@@ -195,7 +195,7 @@ jobs:
             function closureBody() {
               return [
                '## Closure',
-'**Parent deliverable:** ' + parentRef + ' — ' + cleanTitle,
+'**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
 '',
 '### Closure summary',
 '<!-- Summarise the release/deployment outcome and completion status -->',
