@@ -7,24 +7,13 @@ permissions:
   issues: write
   repository-projects: write
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ONE-TIME SETUP REQUIRED
-# ══════════════════════════════════════════════════════════════════════════════
-# GITHUB_TOKEN cannot write to user-level projects (@username's project).
-# You must create a Personal Access Token (PAT) and add it as a repo secret.
-#
-# Steps:
-#   1. Go to GitHub → Settings → Developer settings → Personal access tokens
-#      → Tokens (classic) → Generate new token (classic)
-#   2. Tick the "project" scope (grants read/write to Projects v2)
-#   3. Copy the token
-#   4. Go to your repo → Settings → Secrets and variables → Actions → New secret
-#   5. Name: PROJECT_TOKEN   Value: (paste the token)
-#
-# The workflow uses PROJECT_TOKEN for all project mutations and GITHUB_TOKEN
-# for issue operations (reopen, comment). If PROJECT_TOKEN is not set it will
-# log a warning but still reopen the issue.
-# ══════════════════════════════════════════════════════════════════════════════
+# ── REQUIRED SECRET ──────────────────────────────────────────────────────────
+# Add a repo secret named PROJECT_TOKEN:
+#   GitHub → Settings → Developer settings → Personal access tokens (classic)
+#   → Generate new token → tick "project" scope → copy token
+#   Repo → Settings → Secrets and variables → Actions → New secret
+#   Name: PROJECT_TOKEN
+# ────────────────────────────────────────────────────────────────────────────
 
 jobs:
   validate-parent-close:
@@ -32,14 +21,15 @@ jobs:
     steps:
       - name: Reopen parent and revert project status if sub-issues are open
         uses: actions/github-script@v7
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const parent       = context.payload.issue;
             const owner        = context.repo.owner;
             const repo         = context.repo.repo;
-            // PAT with "project" scope — required for user-level project mutations
-            const projectToken = '${{ secrets.PROJECT_TOKEN }}';
+            const projectToken = process.env.PROJECT_TOKEN;
 
             if (!parent.title.includes('[DELIVERABLE]')) return;
 
@@ -49,19 +39,16 @@ jobs:
               console.log('All sub-issues closed – allowing parent to close.');
               return;
             }
-            console.log(`${openChildren.length} open sub-issue(s) blocking close.`);
+            console.log(`${openChildren.length} open sub-issue(s) found – blocking.`);
 
-            // ── 2. Reopen the issue (GITHUB_TOKEN is sufficient for this) ─────
+            // ── 2. Reopen the issue ───────────────────────────────────────────
             await github.rest.issues.update({
               owner, repo, issue_number: parent.number, state: 'open'
             });
 
-            // ── 3. Revert the project status using the PAT ───────────────────
-            if (!projectToken || projectToken === '') {
-              console.log(
-                '⚠️  PROJECT_TOKEN secret not set – cannot revert project status.\n' +
-                'Create a PAT with the "project" scope and add it as PROJECT_TOKEN.'
-              );
+            // ── 3. Revert project status ──────────────────────────────────────
+            if (!projectToken) {
+              console.log('⚠️  PROJECT_TOKEN not set – skipping project status revert.');
             } else {
               await revertProjectStatus(parent.number, projectToken);
             }
@@ -86,6 +73,26 @@ jobs:
             // HELPERS
             // ═════════════════════════════════════════════════════════════════
 
+            // Use fetch with an explicit token — avoids github.graphql.defaults()
+            // which does NOT reliably override the auth header in github-script.
+            async function gql(token, query, variables = {}) {
+              const res = await fetch('https://api.github.com/graphql', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `bearer ${token}`,
+                  'Content-Type':  'application/json',
+                  'X-Github-Next-Global-ID': '1'
+                },
+                body: JSON.stringify({ query, variables })
+              });
+              const json = await res.json();
+              if (json.errors) {
+                const msg = json.errors.map(e => e.message).join('; ');
+                throw new Error(`GraphQL error: ${msg}`);
+              }
+              return json.data;
+            }
+
             async function findOpenSubIssues(issueNumber) {
               const open = [];
 
@@ -99,6 +106,7 @@ jobs:
                   }
                 );
                 open.push(...data.filter(i => i.state === 'open'));
+                console.log(`Sub-Issues API: ${data.length} linked, ${open.length} open.`);
               } catch (e) {
                 console.log('Sub-Issues API unavailable, using fallback:', e.message);
               }
@@ -127,15 +135,10 @@ jobs:
             }
 
             async function revertProjectStatus(issueNumber, token) {
-              // Use the PAT for GraphQL so we can write to user-level projects
-              const authedGraphql = github.graphql.defaults({
-                headers: { authorization: `token ${token}` }
-              });
-
-              // Query all project items linked to this issue
+              // Step 1: query project items linked to this issue (using PAT via fetch)
               let projectItems;
               try {
-                const result = await authedGraphql(`
+                const data = await gql(token, `
                   query($owner: String!, $repo: String!, $number: Int!) {
                     repository(owner: $owner, name: $repo) {
                       issue(number: $number) {
@@ -160,35 +163,36 @@ jobs:
                     }
                   }
                 `, { owner, repo, number: issueNumber });
-                projectItems = result.repository.issue.projectItems.nodes;
+                projectItems = data.repository.issue.projectItems.nodes;
+                console.log(`Found ${projectItems.length} project item(s).`);
               } catch (e) {
-                console.log('Could not query project items:', e.message);
+                console.log('Failed to query project items:', e.message);
                 return;
               }
 
               for (const item of projectItems) {
-                const statusValue = item.fieldValueByName;
-                if (!statusValue) continue;
-                if (statusValue.name?.toLowerCase() !== 'done') {
-                  console.log(`Status is "${statusValue.name}" – no revert needed.`);
-                  continue;
-                }
+                const sv = item.fieldValueByName;
+                if (!sv) { console.log('No Status field value on item.'); continue; }
 
-                // Find the revert-to option — handles any casing of TO DO / To Do / todo
-                const options = statusValue.field?.options ?? [];
+                console.log(`Current status: "${sv.name}"`);
+                if (sv.name?.toLowerCase() !== 'done') continue;
+
+                // Find the revert-to option
+                const options = sv.field?.options ?? [];
+                console.log('Available options:', options.map(o => o.name).join(', '));
+
                 const notDone = options.filter(o => o.name.toLowerCase() !== 'done');
                 const target  =
                   notDone.find(o => o.name.toLowerCase() === 'in progress') ||
                   notDone.find(o => ['to do', 'todo'].includes(o.name.toLowerCase())) ||
                   notDone[0];
 
-                if (!target) {
-                  console.log('No non-Done option found to revert to.');
-                  continue;
-                }
+                if (!target) { console.log('No non-Done option found.'); continue; }
+                console.log(`Reverting to: "${target.name}" (${target.id})`);
 
+                // Step 2: mutate using the PAT via fetch
                 try {
-                  await authedGraphql(`
+                  await gql(token, `
                     mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
                       updateProjectV2ItemFieldValue(input: {
                         projectId: $project
@@ -200,12 +204,12 @@ jobs:
                   `, {
                     project: item.project.id,
                     item:    item.id,
-                    field:   statusValue.field.id,
+                    field:   sv.field.id,
                     option:  target.id
                   });
-                  console.log(`✅ Project status reverted from "Done" to "${target.name}".`);
+                  console.log(`✅ Status reverted from "Done" to "${target.name}".`);
                 } catch (e) {
-                  console.log('Project status mutation failed:', e.message);
+                  console.log('Mutation failed:', e.message);
                 }
               }
             }
