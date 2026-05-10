@@ -22,16 +22,48 @@ jobs:
             const owner      = context.repo.owner;
             const repo       = context.repo.repo;
             const cleanTitle = issue.title.replace('[DELIVERABLE]', '').trim();
+            const parentRef  = `#${issue.number}`;
 
-            // ── Step 1: try the Sub-Issues API ──
+            const securityBody = `
+## Security Review
+**Parent deliverable:** ${parentRef} — ${cleanTitle}
+
+### Overview
+<!-- Describe the security concern or area requiring review -->
+
+### Security review checklist
+- [ ] Threat model reviewed
+- [ ] Authentication & authorisation controls verified
+- [ ] Input validation and output encoding checked
+- [ ] Sensitive data handling reviewed (storage, transit, logging)
+- [ ] Dependency vulnerabilities scanned (e.g. Dependabot / Snyk)
+- [ ] Secrets management reviewed — no hardcoded credentials
+- [ ] Rate limiting / abuse prevention considered
+- [ ] Security headers / CSP reviewed (if web-facing)
+- [ ] Penetration test required? If yes, scheduled and completed
+
+### Findings
+<!-- List any vulnerabilities or risks found, with severity -->
+| # | Finding | Severity | Status |
+|---|---------|----------|--------|
+| 1 |         |          |        |
+
+### Mitigations / remediation
+<!-- Describe fixes applied or accepted risks -->
+
+### Sign-off
+- [ ] Security review completed
+- [ ] All critical/high findings resolved or formally accepted
+`.trim();
+
+            // ── Check if SECURITY sub-issue already exists ─────────────────
             let linkedSubIssues = [];
             let subIssuesApiAvailable = false;
             try {
               const { data } = await github.request(
                 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
                 {
-                  owner, repo,
-                  issue_number: issue.number,
+                  owner, repo, issue_number: issue.number,
                   headers: { 'X-GitHub-Api-Version': '2022-11-28' }
                 }
               );
@@ -41,11 +73,9 @@ jobs:
               console.log('Sub-Issues API unavailable, using fallback:', e.message);
             }
 
-            // ── Step 2: check if [SECURITY] already exists ──
             let securityExists = linkedSubIssues.some(i => i.title.startsWith('[SECURITY]'));
 
             if (!securityExists) {
-              // Fallback: scan all issues for a [SECURITY] issue referencing this parent
               const issues = [];
               let page = 1;
               while (true) {
@@ -57,22 +87,20 @@ jobs:
                 page++;
               }
               securityExists = issues.some(i =>
-                i.title.startsWith('[SECURITY]') &&
-                i.body  &&
-                i.body.includes(`#${issue.number}`)
+                i.title.startsWith('[SECURITY]') && i.body?.includes(parentRef)
               );
             }
 
             if (securityExists) {
-              console.log('[SECURITY] sub-issue already exists – skipping.');
+              console.log('[SECURITY] already exists – skipping.');
               return;
             }
 
-            // ── Step 3: create the security sub-issue ──
+            // ── Create the SECURITY sub-issue ─────────────────────────────
             const { data: created } = await github.rest.issues.create({
               owner, repo,
               title:  `[SECURITY] ${cleanTitle}`,
-              body:   `Security review required for parent deliverable #${issue.number}`,
+              body:   securityBody,
               labels: ['security-review']
             });
 
@@ -87,9 +115,8 @@ jobs:
                     headers: { 'X-GitHub-Api-Version': '2022-11-28' }
                   }
                 );
-                console.log(`Linked #${created.number} via Sub-Issues API.`);
               } catch (e) {
-                console.log('Link failed (issue still created):', e.message);
+                console.log('Sub-issue link failed:', e.message);
               }
             }
 
