@@ -20,8 +20,81 @@ jobs:
             const owner      = context.repo.owner;
             const repo       = context.repo.repo;
             const cleanTitle = parent.title.replace('[DELIVERABLE]', '').trim();
+            const parentRef  = `#${parent.number}`;
 
-            // ── Helper: paginate all repo issues (fallback dedup check) ──
+            // ── Body templates per sub-issue type ────────────────────────────
+            const templates = {
+              SIA: `
+## Security Impact Assessment
+**Parent deliverable:** ${parentRef} — ${cleanTitle}
+
+### Scope
+<!-- Briefly describe what is being delivered and what systems/data it touches -->
+
+### Impact checklist
+- [ ] Does this change expose new data or APIs?
+- [ ] Does this change affect authentication or authorisation?
+- [ ] Does this change store, transmit or process personal/sensitive data?
+- [ ] Does this change introduce new third-party dependencies?
+- [ ] Does this change affect audit logging or monitoring?
+
+### Risk rating
+<!-- Low / Medium / High — justify below -->
+
+### Mitigations
+<!-- List any controls, guards or follow-up actions -->
+
+### Sign-off
+- [ ] SIA reviewed and approved
+`.trim(),
+
+              TESTING: `
+## Testing
+**Parent deliverable:** ${parentRef} — ${cleanTitle}
+
+### Test scope
+<!-- What needs to be tested? List features, flows, edge cases -->
+
+### Test checklist
+- [ ] Unit tests written and passing
+- [ ] Integration tests written and passing
+- [ ] Edge cases identified and covered
+- [ ] Regression tests run — no new failures
+- [ ] Performance impact assessed (if applicable)
+- [ ] Accessibility checked (if applicable)
+
+### Test environments
+- [ ] Dev
+- [ ] Staging
+- [ ] Production smoke test
+
+### Sign-off
+- [ ] All tests passing
+- [ ] Test evidence attached or linked
+`.trim(),
+
+              CLOSURE: `
+## Closure
+**Parent deliverable:** ${parentRef} — ${cleanTitle}
+
+### Closure checklist
+- [ ] All sub-issues closed
+- [ ] Code merged to main branch
+- [ ] Deployment completed successfully
+- [ ] Documentation updated
+- [ ] Stakeholders notified
+- [ ] Monitoring / alerts confirmed healthy post-deploy
+- [ ] Any follow-up tickets raised for known future work
+
+### Deployment notes
+<!-- Version, deploy date, environment, rollback plan if needed -->
+
+### Sign-off
+- [ ] Closure confirmed by team lead
+`.trim()
+            };
+
+            // ── Helpers ───────────────────────────────────────────────────────
             async function getAllIssues() {
               const issues = [];
               let page = 1;
@@ -36,28 +109,24 @@ jobs:
               return issues;
             }
 
-            // ── Step 1: try the Sub-Issues API (beta — may not be available on all accounts) ──
+            // ── Check existing sub-issues ─────────────────────────────────────
             let linkedSubIssues = [];
             let subIssuesApiAvailable = false;
             try {
               const { data } = await github.request(
                 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
                 {
-                  owner, repo,
-                  issue_number: parent.number,
+                  owner, repo, issue_number: parent.number,
                   headers: { 'X-GitHub-Api-Version': '2022-11-28' }
                 }
               );
               linkedSubIssues = data;
               subIssuesApiAvailable = true;
-              console.log(`Sub-Issues API OK. Found ${data.length} linked sub-issue(s).`);
             } catch (e) {
-              console.log('Sub-Issues API unavailable, will use title/body fallback:', e.message);
+              console.log('Sub-Issues API unavailable, using fallback:', e.message);
             }
 
-            // ── Step 2: build set of prefixes that already exist ──
             let existingPrefixes = new Set();
-
             if (subIssuesApiAvailable && linkedSubIssues.length > 0) {
               existingPrefixes = new Set(
                 linkedSubIssues
@@ -65,21 +134,14 @@ jobs:
                   .filter(Boolean)
               );
             } else {
-              // Fallback: match issues that (a) have a known prefix AND
-              // (b) reference this parent issue number in their body.
-              // Both conditions together prevent false-positives from unrelated issues.
               const all = await getAllIssues();
               for (const i of all) {
-                const prefixMatch = i.title.match(/^\[(SIA|TESTING|CLOSURE|SECURITY)\]/);
-                const hasBodyRef  = i.body && i.body.includes(`#${parent.number}`);
-                if (prefixMatch && hasBodyRef) {
-                  existingPrefixes.add(prefixMatch[1]);
-                }
+                const m = i.title.match(/^\[(SIA|TESTING|CLOSURE|SECURITY)\]/);
+                if (m && i.body?.includes(parentRef)) existingPrefixes.add(m[1]);
               }
-              console.log(`Fallback found: [${[...existingPrefixes].join(', ') || 'none'}]`);
             }
 
-            // ── Step 3: create missing sub-issues and attempt to link them ──
+            // ── Create missing sub-issues ─────────────────────────────────────
             async function createAndLink(prefix, label) {
               if (existingPrefixes.has(prefix)) {
                 console.log(`[${prefix}] already exists – skipping.`);
@@ -88,9 +150,8 @@ jobs:
 
               const { data: created } = await github.rest.issues.create({
                 owner, repo,
-                title: `[${prefix}] ${cleanTitle}`,
-                // The body MUST include the parent reference — the fallback scan relies on it
-                body:  `Parent deliverable: #${parent.number}`,
+                title:  `[${prefix}] ${cleanTitle}`,
+                body:   templates[prefix],
                 labels: [label]
               });
 
@@ -105,9 +166,8 @@ jobs:
                       headers: { 'X-GitHub-Api-Version': '2022-11-28' }
                     }
                   );
-                  console.log(`Linked #${created.number} via Sub-Issues API.`);
                 } catch (e) {
-                  console.log(`Link failed for #${created.number} (issue still created):`, e.message);
+                  console.log(`Sub-issue link failed for #${created.number}:`, e.message);
                 }
               }
 
