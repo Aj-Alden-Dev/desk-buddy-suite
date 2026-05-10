@@ -28,7 +28,7 @@ jobs:
             function securityBody() {
               return [
   '## Security Review',
-  '**Parent deliverable:** ' + parentRef + ' \\u2014 ' + cleanTitle,
+  '**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
   '',
 
   '### Overview',
@@ -86,7 +86,7 @@ jobs:
   '### Sign-off',
   '- [ ] Security review completed',
   '- [ ] All critical/high findings resolved or formally accepted'
-].join('\\n');
+].join('\n');
             }
 
             // ── Check if SECURITY sub-issue already exists ────────────────────
