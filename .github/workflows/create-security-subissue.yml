@@ -22,41 +22,44 @@ jobs:
             const owner      = context.repo.owner;
             const repo       = context.repo.repo;
             const cleanTitle = issue.title.replace('[DELIVERABLE]', '').trim();
-            const parentRef  = `#${issue.number}`;
+            const parentRef  = '#' + issue.number;
 
-            const securityBody = `
-## Security Review
-**Parent deliverable:** ${parentRef} — ${cleanTitle}
+            // ── Body template (array join avoids YAML indentation conflicts) ──
+            function securityBody() {
+              return [
+                '## Security Review',
+                '**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
+                '',
+                '### Overview',
+                '<!-- Describe the security concern or area requiring review -->',
+                '',
+                '### Security review checklist',
+                '- [ ] Threat model reviewed',
+                '- [ ] Authentication & authorisation controls verified',
+                '- [ ] Input validation and output encoding checked',
+                '- [ ] Sensitive data handling reviewed (storage, transit, logging)',
+                '- [ ] Dependency vulnerabilities scanned (e.g. Dependabot / Snyk)',
+                '- [ ] Secrets management reviewed \u2014 no hardcoded credentials',
+                '- [ ] Rate limiting / abuse prevention considered',
+                '- [ ] Security headers / CSP reviewed (if web-facing)',
+                '- [ ] Penetration test required? If yes, scheduled and completed',
+                '',
+                '### Findings',
+                '<!-- List any vulnerabilities or risks found, with severity -->',
+                '| # | Finding | Severity | Status |',
+                '|---|---------|----------|--------|',
+                '| 1 |         |          |        |',
+                '',
+                '### Mitigations / remediation',
+                '<!-- Describe fixes applied or accepted risks -->',
+                '',
+                '### Sign-off',
+                '- [ ] Security review completed',
+                '- [ ] All critical/high findings resolved or formally accepted',
+              ].join('\n');
+            }
 
-### Overview
-<!-- Describe the security concern or area requiring review -->
-
-### Security review checklist
-- [ ] Threat model reviewed
-- [ ] Authentication & authorisation controls verified
-- [ ] Input validation and output encoding checked
-- [ ] Sensitive data handling reviewed (storage, transit, logging)
-- [ ] Dependency vulnerabilities scanned (e.g. Dependabot / Snyk)
-- [ ] Secrets management reviewed — no hardcoded credentials
-- [ ] Rate limiting / abuse prevention considered
-- [ ] Security headers / CSP reviewed (if web-facing)
-- [ ] Penetration test required? If yes, scheduled and completed
-
-### Findings
-<!-- List any vulnerabilities or risks found, with severity -->
-| # | Finding | Severity | Status |
-|---|---------|----------|--------|
-| 1 |         |          |        |
-
-### Mitigations / remediation
-<!-- Describe fixes applied or accepted risks -->
-
-### Sign-off
-- [ ] Security review completed
-- [ ] All critical/high findings resolved or formally accepted
-`.trim();
-
-            // ── Check if SECURITY sub-issue already exists ─────────────────
+            // ── Check if SECURITY sub-issue already exists ────────────────────
             let linkedSubIssues = [];
             let subIssuesApiAvailable = false;
             try {
@@ -76,31 +79,31 @@ jobs:
             let securityExists = linkedSubIssues.some(i => i.title.startsWith('[SECURITY]'));
 
             if (!securityExists) {
-              const issues = [];
+              const all = [];
               let page = 1;
               while (true) {
                 const { data } = await github.rest.issues.listForRepo({
                   owner, repo, state: 'all', per_page: 100, page
                 });
-                issues.push(...data);
+                all.push(...data);
                 if (data.length < 100) break;
                 page++;
               }
-              securityExists = issues.some(i =>
-                i.title.startsWith('[SECURITY]') && i.body?.includes(parentRef)
+              securityExists = all.some(i =>
+                i.title.startsWith('[SECURITY]') && i.body && i.body.includes(parentRef)
               );
             }
 
             if (securityExists) {
-              console.log('[SECURITY] already exists – skipping.');
+              console.log('[SECURITY] already exists - skipping.');
               return;
             }
 
-            // ── Create the SECURITY sub-issue ─────────────────────────────
+            // ── Create the SECURITY sub-issue ─────────────────────────────────
             const { data: created } = await github.rest.issues.create({
               owner, repo,
-              title:  `[SECURITY] ${cleanTitle}`,
-              body:   securityBody,
+              title:  '[SECURITY] ' + cleanTitle,
+              body:   securityBody(),
               labels: ['security-review']
             });
 
@@ -123,7 +126,7 @@ jobs:
             await github.rest.issues.createComment({
               owner, repo,
               issue_number: issue.number,
-              body: `## Security sub-issue created\n- #${created.number} ${created.title}`
+              body: '## Security sub-issue created\n- #' + created.number + ' ' + created.title
             });
 
-            console.log(`Created [SECURITY] #${created.number}`);
+            console.log('Created [SECURITY] #' + created.number);
