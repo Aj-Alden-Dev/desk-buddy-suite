@@ -1,4 +1,5 @@
 name: Create Security Sub-Issue
+
 on:
   issues:
     types: [labeled]
@@ -9,14 +10,18 @@ permissions:
 jobs:
   create-security-subissue:
     runs-on: ubuntu-latest
+
     if: >-
       github.event.label.name == 'security-impact' &&
       contains(github.event.issue.title, '[DELIVERABLE]')
+
     steps:
       - name: Create and link SECURITY sub-issue
         uses: actions/github-script@v7
+
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
           script: |
             const issue      = context.payload.issue;
             const owner      = context.repo.owner;
@@ -24,103 +29,134 @@ jobs:
             const cleanTitle = issue.title.replace('[DELIVERABLE]', '').trim();
             const parentRef  = '#' + issue.number;
 
-            // ── Body template (array join avoids YAML indentation conflicts) ──
+            // ── Body template ───────────────────────────────────────────────
+            // Using array.join('\n') avoids YAML multiline parsing issues.
+
             function securityBody() {
               return [
-  '## Security Review',
-  '**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
-  '',
+                '## Security Review',
+                '**Parent deliverable:** ' + parentRef + ' \u2014 ' + cleanTitle,
+                '',
 
-  '### Overview',
-  '<!-- Summarise the security review scope and impacted areas -->',
-  '',
+                '### Overview',
+                '<!-- Summarise the security review scope and impacted areas -->',
+                '',
 
-  '### Security review checklist',
-  '- [ ] Threat model reviewed',
-  '- [ ] Authentication & authorisation controls verified',
-  '- [ ] Input validation and output encoding checked',
-  '- [ ] Sensitive data handling reviewed (storage, transit, logging)',
-  '- [ ] Encryption in transit verified (HTTPS/TLS)',
-  '- [ ] Encryption at rest verified',
-  '- [ ] Dependency vulnerabilities scanned (e.g. Dependabot / Snyk)',
-  '- [ ] Security-focused code review completed',
-  '- [ ] Secrets management reviewed — no hardcoded credentials',
-  '- [ ] Audit logging and monitoring verified',
-  '- [ ] Security alerts and monitoring configured',
-  '- [ ] Rate limiting / abuse prevention considered',
-  '- [ ] Security headers / CSP reviewed (if web-facing)',
-  '- [ ] Backup and recovery impact assessed',
-  '- [ ] Data retention obligations reviewed',
-  '- [ ] Privacy compliance requirements reviewed',
-  '- [ ] Penetration test required? If yes, scheduled and completed',
-  '',
+                '### Security review checklist',
+                '- [ ] Threat model reviewed',
+                '- [ ] Authentication & authorisation controls verified',
+                '- [ ] Input validation and output encoding checked',
+                '- [ ] Sensitive data handling reviewed (storage, transit, logging)',
+                '- [ ] Encryption in transit verified (HTTPS/TLS)',
+                '- [ ] Encryption at rest verified',
+                '- [ ] Dependency vulnerabilities scanned (e.g. Dependabot / Snyk)',
+                '- [ ] Security-focused code review completed',
+                '- [ ] Secrets management reviewed — no hardcoded credentials',
+                '- [ ] Audit logging and monitoring verified',
+                '- [ ] Security alerts and monitoring configured',
+                '- [ ] Rate limiting / abuse prevention considered',
+                '- [ ] Security headers / CSP reviewed (if web-facing)',
+                '- [ ] Backup and recovery impact assessed',
+                '- [ ] Data retention obligations reviewed',
+                '- [ ] Privacy compliance requirements reviewed',
+                '- [ ] Penetration test required? If yes, scheduled and completed',
+                '',
 
-  '### Findings',
-  '| # | Finding | Severity | Owner | Due Date | Status |',
-  '|---|---|---|---|---|---|',
-  '',
+                '### Findings',
+                '| # | Finding | Severity | Owner | Due Date | Status |',
+                '|---|---|---|---|---|---|',
+                '',
 
-  '### Mitigations / remediation',
-  '<!-- Describe remediation actions and planned fixes -->',
-  '',
+                '### Mitigations / remediation',
+                '<!-- Describe remediation actions and planned fixes -->',
+                '',
 
-  '### Residual Risks',
-  '<!-- Document accepted or unresolved risks -->',
-  '',
+                '### Residual Risks',
+                '<!-- Document accepted or unresolved risks -->',
+                '',
 
-  '### Evidence Links',
-  '- Parent Issue: ' + parentRef,
-  '- Related PR: ',
-  '- Vulnerability Scan Results: ',
-  '- Penetration Test Evidence: ',
-  '',
+                '### Evidence Links',
+                '- Parent Issue: ' + parentRef,
+                '- Related PR: ',
+                '- Vulnerability Scan Results: ',
+                '- Penetration Test Evidence: ',
+                '',
 
-  '### Approval Details',
-  '| Role | Name | Status |',
-  '|---|---|---|',
-  '| Security Reviewer |  | Pending |',
-  '| Engineering Lead |  | Pending |',
-  '| QA Lead |  | Pending |',
-  '',
+                '### Approval Details',
+                '| Role | Name | Status |',
+                '|---|---|---|',
+                '| Security Reviewer |  | Pending |',
+                '| Engineering Lead |  | Pending |',
+                '| QA Lead |  | Pending |',
+                '',
 
-  '### Sign-off',
-  '- [ ] Security review completed',
-  '- [ ] All critical/high findings resolved or formally accepted'
-].join('\n');
+                '### Sign-off',
+                '- [ ] Security review completed',
+                '- [ ] All critical/high findings resolved or formally accepted'
+              ].join('\n');
             }
 
-            // ── Check if SECURITY sub-issue already exists ────────────────────
+            // ── Check if SECURITY sub-issue already exists ──────────────────
+
             let linkedSubIssues = [];
             let subIssuesApiAvailable = false;
+
             try {
               const { data } = await github.request(
                 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
                 {
-                  owner, repo, issue_number: issue.number,
-                  headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  headers: {
+                    'X-GitHub-Api-Version': '2022-11-28'
+                  }
                 }
               );
+
               linkedSubIssues = data;
               subIssuesApiAvailable = true;
+
             } catch (e) {
-              console.log('Sub-Issues API unavailable, using fallback:', e.message);
+              console.log(
+                'Sub-Issues API unavailable, using fallback:',
+                e.message
+              );
             }
 
-            let securityExists = linkedSubIssues.some(i => i.title.startsWith('[SECURITY]'));
+            let securityExists = linkedSubIssues.some(
+              i => i.title.startsWith('[SECURITY]')
+            );
+
+            // ── Fallback search if Sub-Issues API unavailable ───────────────
 
             if (!securityExists) {
               const all = [];
               let page = 1;
+
               while (true) {
                 const { data } = await github.rest.issues.listForRepo({
-                  owner, repo, state: 'all', per_page: 100, page
+                  owner,
+                  repo,
+                  state: 'all',
+                  per_page: 100,
+                  page
                 });
+
                 all.push(...data);
-                if (data.length < 100) break;
+
+                if (data.length < 100) {
+                  break;
+                }
+
                 page++;
               }
-              securityExists = all.some(i =>
-                i.title.startsWith('[SECURITY]') && i.body && i.body.includes(parentRef)
+
+              securityExists = all.some(
+                i =>
+                  i.title.startsWith('[SECURITY]') &&
+                  i.body &&
+                  i.body.includes(parentRef)
               );
             }
 
@@ -129,34 +165,52 @@ jobs:
               return;
             }
 
-            // ── Create the SECURITY sub-issue ─────────────────────────────────
+            // ── Create SECURITY sub-issue ───────────────────────────────────
+
             const { data: created } = await github.rest.issues.create({
-              owner, repo,
-              title:  '[SECURITY] ' + cleanTitle,
-              body:   securityBody(),
+              owner,
+              repo,
+              title: '[SECURITY] ' + cleanTitle,
+              body: securityBody(),
               labels: ['security-review']
             });
+
+            // ── Link sub-issue to parent ────────────────────────────────────
 
             if (subIssuesApiAvailable) {
               try {
                 await github.request(
                   'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
                   {
-                    owner, repo,
-                    issue_number:     issue.number,
+                    owner,
+                    repo,
+                    issue_number: issue.number,
                     sub_issue_number: created.number,
-                    headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                    headers: {
+                      'X-GitHub-Api-Version': '2022-11-28'
+                    }
                   }
                 );
+
               } catch (e) {
-                console.log('Sub-issue link failed:', e.message);
+                console.log(
+                  'Sub-issue link failed:',
+                  e.message
+                );
               }
             }
 
+            // ── Comment on parent issue ─────────────────────────────────────
+
             await github.rest.issues.createComment({
-              owner, repo,
+              owner,
+              repo,
               issue_number: issue.number,
-              body: '## Security sub-issue created\n- #' + created.number + ' ' + created.title
+              body:
+                '## Security sub-issue created\n' +
+                '- #' + created.number + ' ' + created.title
             });
 
-            console.log('Created [SECURITY] #' + created.number);
+            console.log(
+              'Created [SECURITY] #' + created.number
+            );
