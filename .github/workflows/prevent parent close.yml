@@ -31,7 +31,11 @@ jobs:
             const repo         = context.repo.repo;
             const projectToken = process.env.PROJECT_TOKEN;
 
-            if (!parent.title.includes('[DELIVERABLE]')) return;
+            if (!parent.title.includes('[DELIVERABLE]')&&
+            !parent.title.includes('[DEV]') &&
+            !parent.title.includes('[UI]') &&
+            !parent.title.includes('[PERFORMANCE]') &&
+            !parent.title.includes('[TEST]')) return;
 
             // ── 1. Find open sub-issues ───────────────────────────────────────
             const openChildren = await findOpenSubIssues(parent.number);
