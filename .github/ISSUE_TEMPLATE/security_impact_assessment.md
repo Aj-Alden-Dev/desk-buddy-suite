@@ -8,8 +8,7 @@ assignees: ""
 
 # Security Impact Assessment
 
-**Parent deliverable:** 
-
+**Parent deliverable:** {{PARENT_ISSUE}}
 ---
 
 ## Scope
