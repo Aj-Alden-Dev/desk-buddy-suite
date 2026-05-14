@@ -6,6 +6,8 @@ labels: ["security","review"]
 assignees: ""
 ---
 
+**Parent deliverable:** #<issue-number> - <deliverable-title>
+
 # Security Review
 
 > Replace the below parent issue reference manually after creating the card.
